@@ -1,0 +1,89 @@
+---
+title: "Predictive Modeling"
+author: "Ryan DeStefano"
+format: 
+  html:
+    code-fold: true
+    code-line-numbers: true
+    code-tools: true
+    self-contained: true
+editor: visual
+execute:
+  message: false
+---
+
+```{r}
+#| label: libraries-r
+#| include: false
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(discrim)
+library(rpart)
+library(rpart.plot)
+library(baguette)
+library(janitor)
+library(kernlab)
+library(kknn)
+library(keras)
+```
+
+```{r}
+CAH_201803_train <- read.csv(file = "CAH-201803-train.csv")
+CAH_201803_test <- read.csv(file = "CAH-201803-test.csv")
+
+CAH <- CAH_201803_train[ , 2:19]
+
+cah_cvs <- vfold_cv(CAH, v = 10)
+
+cah_recipe <- recipe(political_affiliation ~ ., data = CAH) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+```
+
+**Random Forests: Accuracy around .56**
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+rf_grid <- grid_regular(mtry(c(1,50)), min_n())
+
+wflow <- workflow() %>%
+  add_recipe(cah_recipe) %>%
+  add_model(rf_spec)
+
+tree_grid_search <-
+  tune_grid(
+    wflow,
+    resamples = cah_cvs,
+    grid = rf_grid
+  )
+
+tuning_metrics <- tree_grid_search %>% collect_metrics()
+
+tuning_metrics %>%
+  filter(.metric == "accuracy") %>%
+  slice_max(mean)
+```
+
+```{r}
+rf_spec <- rand_forest(mtry = 1, min_n = 2, trees = 100) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+rf_workflow <- workflow() %>%
+  add_recipe(cah_recipe) %>%
+  add_model(rf_spec)
+
+rf_fit <- rf_workflow %>%
+    fit(CAH)
+
+final_predictions <- data.frame(
+    id_num  = CAH_201803_test$id_num,
+    political_affiliation_predicted = predict(rf_fit, CAH_201803_test)$.pred_class
+)
+
+final_predictions %>% write_csv("final_predictions.csv")
+```
